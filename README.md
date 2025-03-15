@@ -1,8 +1,6 @@
 # Segmented-File-Server-client <!-- omit in toc -->
 
-[![Tests](../../workflows/Bats%20test/badge.svg)](../../actions?query=workflow%3A"Bats+test")
-
-The starter code and (limited) tests for the client code for the Segmented File System lab.
+The starter code and (limited) tests for the Segmented File System client.
 
 - [Background](#background)
 - [Segmenting the files](#segmenting-the-files)
@@ -10,8 +8,11 @@ The starter code and (limited) tests for the client code for the Segmented File 
   - [The packet structure](#the-packet-structure)
   - [How to construct packet numbers](#how-to-construct-packet-numbers)
 - [Writing the client backend](#writing-the-client-backend)
+  - [Establishing the connection](#establishing-the-connection)
   - [Starting the conversation](#starting-the-conversation)
   - [Processing the packets you receive](#processing-the-packets-you-receive)
+  - [Data structures for packets in Rust](#data-structures-for-packets-in-rust)
+  - [Data structures for files (packet groups) in Rust](#data-structures-for-files-packet-groups-in-rust)
 - [Testing](#testing)
   - [Unit test your work](#unit-test-your-work)
   - [Check your work by running your client by hand](#check-your-work-by-running-your-client-by-hand)
@@ -23,52 +24,70 @@ Those wacky folks at OutOfMoney.com are at it again, and have come up with anoth
 
 In a rare fit of sanity, they've brought you in to help them out by building the backend of the client.
 
-*This is one of the more time-consuming labs, so prepare and plan accordingly.*
-
-This starter code comes with some simple `bats` tests, but as discussed below you'll almost certainly want to add additional JUnit tests of your own to test the design and implementation of your data management tools.
+This starter code comes with some simple `bats` tests, but as discussed below you'll almost certainly want to add additional unit tests of your own to test the design and implementation of your data management tools.
 
 ## Segmenting the files
 
-They're using socket-based connections between the client and server, but someone who is long since fired decided that it was important that the server break the files up into 1K chunks and send each chunk separately using UDP. Because of various sources of asynchrony such as threads on the server and network delays, you can't be sure you'll receive the chunks in the right order, so you'll need to collect and re-assemble them before writing out the file.
+They're using socket-based connections between the client and server, but someone
+who is long since fired decided that it was important that the server break the
+files up into 1K chunks and send each chunk separately using UDP. Because of
+various sources of asynchrony such as threads on the server and network delays,
+you can't be sure you'll receive the chunks in the right order, so you'll need
+to collect and re-assemble them before writing the contents out to the file.
 
-Unlike the socket connections we used for the Echo Server earlier, this system uses UDP or Datagram sockets. "Regular" sockets (also known as stream sockets or TCP sockets) provide you with a stable two-way connection that remains active until you disconnect. Datagram sockets are less structured, and you essentially just send out packets of information which can arrive at their destination in an arbitrary order, much like the description of packets in Chapter 7 of [Saltzer and Kaashoek](http://ocw.mit.edu/resources/res-6-004-principles-of-computer-system-design-an-introduction-spring-2009/) ([PDF of that chapter](https://ocw.mit.edu/resources/res-6-004-principles-of-computer-system-design-an-introduction-spring-2009/online-textbook/networks_open_5_0.pdf)) or [this online pdf](http://www.ee.columbia.edu/~bbathula/courses/HPCN/chap03_part-1.pdf). On the listening end, instead of reading a stream of data, data arrives in packets, and it's your job to interpret their contents. Typically there is some sort of protocol that describes how packets are formed and interpreted; otherwise we end up with an impossible guessing game.
+Unlike the TCP socket connections you probably used for the Echo Client/Server labs
+in Practicum, this system
+uses UDP or Datagram sockets. TCP sockets provide you with a stable two-way connection that remains active
+until you disconnect. TCP also guarantees that packets are delivered in the same
+order that they are sent, and a good faith effort is made to re-send packets
+that are lost along the way. Datagram sockets are less structured and provide no
+guarantees about order or lost packets, and you essentially
+just send out packets of information which can arrive at their destination in an
+arbitrary order, much like the description of packets in Chapter 7 of
+[Saltzer and Kaashoek](http://ocw.mit.edu/resources/res-6-004-principles-of-computer-system-design-an-introduction-spring-2009/).
+On the listening end, instead of reading a stream of data, data arrives in packets,
+and it's your job to interpret their contents. Typically there is some sort of protocol
+that describes how packets are formed and interpreted; otherwise we end up with an impossible guessing game.
 
-Java provides direct support for UPD/datagram sockets primarily through the `DatagramSocket` and `DatagramPacket` classes. See the tutorial [Writing a Datagram Client and Server](http://docs.oracle.com/javase/tutorial/networking/datagrams/clientServer.html) for more; what you care about is down in the "The QuoteClient class" section.
+Rust provides direct support for UPD/datagram sockets primarily through the
+[`UdpSocket` type](https://doc.rust-lang.org/stable/std/net/struct.UdpSocket.html). The
+documentation includes examples of the methods; see
+[this example](https://gist.github.com/lanedraex/bc01eb399614359470cfacc9d95993fb)
+for a simple working client/server system.
 
-:bangbang: ***There are security implications of using UDP,*** which is one of many reasons why one would tend to use TCP instead unless you have a good reason to use UDP. If you establish a datagram socket, you're essentially willing to receive packets from anyone sending to the UDP port you're listening on. In this lab, for example, there's nothing to stop someone from throwing stuff at your UDP port at the same time that the server is sending you files there, and there's no simple way to distinguish legitimate packets from bogus (and possibly) malicious packets. In this case (partly because we're using Java) it's hard to do much more than corrupt the files and (if your error checking isn't great) crash the client. In systems where buffer overruns are possible (typically programmed in C), then attacks on UDP ports can in extreme cases lead to gaining root.
-
-:bangbang: **You probably don't want to use WiFi for this.** Unlike TCP,
-UDP doesn't promise that packets will arrive, so it's theoretically possible
-that a client won't receive all the packets sent by the server. We don't
-typically see that when using the lab boxes as the capacity of the wired
-Ethernet network isn't particularly stressed by this. If, however, you bring
-in a laptop and run the client there, all the network traffic happens across
-the wireless network and there is a much higher probability that packets will
-be lost. If this happens, there's no way for the client to "fix" the problem
-since the protocol doesn't provide any way to request a re-send for missing
-packets.
-
-:bangbang: Make sure you shut down all your client processes before you leave the lab. If you leave them running you can block ports and make it impossible for other people to work on their lab on that computer.
+:bangbang: If you're working on lab computers, make sure you shut down all your
+client processes before you leave the lab. If you leave them running you can
+block ports and make it impossible for other people to work on their lab on that computer.
 
 ## The OutOfMoney.com protocol
 
-Your job is to write a (Java) program that sends a UDP/datagram packet to the server, and then waits and receives packets from the server until all three files are completely received. When a file is complete, it should be written to disk using the file name sent in the header packet. When all three files have been written to disk, the client should terminate cleanly. As mentioned above, since the file will be broken up into chunks and sent using UDP, we need a protocol to tell us how to interpret the pieces we receive so we can correctly assemble them. Those clever clogs at OutOfMoney.com didn't have much experience (ok, any experience) designing these kinds of protocols, so theirs isn't necessarily the greatest, but it gets the job done.
+Your job is to write a (Rust) program that sends a UDP packet to
+the server, and then waits and receives packets from the server until
+all three expected files are completely received. When a file is complete,
+it should be written to disk using the file name sent in the header
+packet. When all three files have been written to disk, the client
+should terminate cleanly. As mentioned above, since the file will be
+broken up into chunks and sent using UDP, we need a protocol to tell
+us how to interpret the packets we receive so we can correctly assemble
+them. Those clever clogs at OutOfMoney.com didn't have much experience
+(ok, any experience) designing these kinds of protocols, so theirs isn't
+necessarily the greatest, but it gets the job done.
 
 ### The packet structure
 
 In this protocol there are essentially two kinds of packets:
 
-* A header packet with a unique file ID for the file being transferred, and
+- A header packet with a unique file ID for the file being transferred, and
   the actual name of the file so we'll know what to call it after we've assembled
   the pieces
-* A data packet, with the unique file ID (so we know what file this is part of),
+- A data packet, with the unique file ID (so we know what file this is part of),
   the packet number, and the data for that chunk.
 
 Each packet starts with a status byte that indicates which type of packet it is:
 
-* If the status byte is even (i.e., the least significant bit is 0), then this is a header packet
-* If the status byte is odd (i.e., the least significant bit is 1), then this is a data packet
-* If the status byte's second bit is also 1 (i.e., it's 3 mod 4), then this is the *last* data packet for this file
+- If the status byte is even (i.e., the least significant bit is 0), then this is a header packet
+- If the status byte is odd (i.e., the least significant bit is 1), then this is a data packet
+- If the status byte's second bit is also 1 (i.e., it's 3 mod 4), then this is the *last* data packet for this file
   They could have included the number of packets in the header packet, but they chose to to mark the last packet
   instead. Note that the last data packet (in terms of being the last bytes in the file) isn't guaranteed to come
   last, and might come anywhere in the stream including possibly being the *first* packet to arrive.
@@ -87,9 +106,9 @@ The structure of a data packet is:
 |:------------|:--------|:--------------|:------------------------------------|
 | 1 byte      | 1 byte  | 2 bytes       | the rest of the bytes in the packet |
 
-:bangbang: Note that you'll need to look at the length field in the received
-packet to figure out how many bytes are in "the rest of the bytes in the
-package". Most of the received packets will probably be "full", but the last
+:bangbang: Note that you'll need to look at the length returned by `recv_from`
+to figure out how many bytes are in "the rest of the bytes in the
+packet". Most of the received packets will probably be "full", but the last
 packet is likely to be "short". You may assume that the maximum packet size,
 however, is 1028 bytes (a data packet with 4 bytes of bookkeeping and 1024
 bytes of data).
@@ -102,139 +121,179 @@ The decision to only use 1 byte for the file ID means that there can't be more t
 
 A data packet has two bytes that specify the packet number, but how do you take
 those two bytes and make a packet number out of them? It's "fairly"
-straightforward, but there is an annoying complication because Java doesn't
-natively support unsigned integer types.
-
-The "simple" part is to realize that we can treat an individual byte as a
-"digit" in a base 256 number. So in the same way that 37 is a two digit
-decimal number, which we interpret as 3*10 + 7, the pair of bytes:
+straightforward although we do need to be clear about which byte
+is the most significant byte and which is the least significant byte.
+This protocol uses "big endian" ordering, where the first byte is the most
+significant byte.
 
 | most significant byte | least significant byte |
 |:----------------------|:-----------------------|
 | X                     | Y                      |
 
-as 256*X + Y.
-
-There's a question there of whether the most significant byte comes first
-or second; on our protocol, the first byte is the most significant byte as
-above. The question of whether the most significant bytes (or bits) come first
-or last is important; either works, but it crucial that everyone agrees on
-a standard. This is what [arguments about "little endian" and "big endian"
+The question of whether the most significant bytes (or bits) come first
+or last is important; either works, but it is crucial for a given protocol that everyone agrees on
+an approach. This is what [arguments about "little endian" and "big endian"
 systems](https://en.wikipedia.org/wiki/Endianness) are all about.
 
-**Now for the complication.** In an unsigned universe, a byte can represent
-values from 0 to 255. That's really what we're after here; packet numbers
-are non-negative, so we'd like to think of X and Y as both non-negative values
-so we can just say the packet number is 256*X + Y.
+Rust provides a nice method for converting an array
+of two bytes (represented as `u8`s) into a `u16`:
 
-But we can't.
-
-Because Java doesn't support unsigned values. So _it_ thinks a byte represents
-the values -128 to 127, and if we just take those values and do 256*X + Y we'll
-end up with some messed up values that really won't work.
-
-How do we fix that? First, we're going to _have_ to assign the `byte` value to
-an `int` value so we can represent values larger than 127. So we might have
-something like:
-
-```java
-int x = bytes[2];
-int y = bytes[3];
+```rust
+// Assume `bytes` is the array of bytes in a data packet.
+let packet_number_bytes: [u8; 2] = [bytes[2], bytes[3]];
+let packet_number = u16::from_be_bytes(packet_number_bytes);
 ```
 
-(`x` and `y` aren't great names, and you might talk about whether there
-are better names.) Now we'll have a value between -128 and 127 that we need
-to convert to the range 0 to 255. All the numbers from 0 to 127 are "OK" and
-can be left alone. The negative values, though, need to be converted to the
-range 128 to 255, with -128 mapping to 128, and -1 mapping to 255. One way to
-deal with that would be:
-
-```java
-if (x < 0) {
-  x += 256
-}
-if (y < 0) {
-  y += 256
-}
-```
-
-*Do you see why adding 256 to negative values fixes thing?*
-
-(The fact that we have to do the same thing to both of these _strongly_ suggests
-that you want a function that converts a `byte` to an unsigned `int` instead of
-repeating the logic.)
-
-There's a faster alternative that doesn't involve conditionals that uses bit
-masking. We're not going to go into that here, but you might want to
-[read about it](https://mkyong.com/java/java-convert-bytes-to-unsigned-bytes)
-and give it a try.
-
-As yet another alternative, starting with Java 8 there's
-a `Byte.toUnsignedInt()` method that does exactly what we want:
-
-```java
-int x = Byte.toUnsignedInt(bytes[2])
-int y = Byte.toUnsignedInt(bytes[3])
-```
+The "be" in `from_be_bytes` stands for "big endian"; there is also a
+`from_le_bytes` if you have a "little endian" protocol.
 
 ## Writing the client backend
 
-As mentioned above, your (Java) program starts things off by sending a UDP/datagram packet to the server, and then waits and receives packets from the server until all three files are completely received. When a file is complete, it should be written to disk using the file name sent in the header packet. When all three files have been written to disk, the client should terminate cleanly.
+As mentioned above, your Rust program starts things off by connecting (binding) a UDP socket to the server, and then sending a UDP packet to the server. It then waits and receives packets from the server until all three files are completely received. When a file is complete, it should be written to disk using the file name sent in the header packet. When all three files have been written to disk, the client should terminate cleanly.
+
+### Establishing the connection
+
+To establish a connection with the server requires two steps:
+
+- Binding to port `7077` on the server with [`UdpSocket::bind()`](https://doc.rust-lang.org/stable/std/net/struct.UdpSocket.html#method.bind), which returns the desired `UdpSocket` value in a `std::io::Result` type.
+- Call [`.connect()`](https://doc.rust-lang.org/stable/std/net/struct.UdpSocket.html#method.connect) on the returned socket to establish the two-way connection. This returns a `std::io::Result<()>` type so the system can indicate errors if necessary.
+
+To do this you'll need to know the name of the server you're connecting to, and the port to use for the connection. We'll
+use `127.0.0.1` (i.e., `localhost`) for the server, and port `7077`.
 
 ### Starting the conversation
 
-You start things off by sending a (mostly empty) packet to the server as a way of saying "Hello – send me stuff!". To do this you'll need to know the name of the server you're connecting to, and the port to use for the connection; this information should be provided in class.
+You start things off by sending a (mostly empty) packet to the server as a way of saying "Hello – send me stuff!".
 
-What should that initial packet look like that you send to the server to start
+What should that initial packet look like in order to start
 things off? Actually, it can be completely empty, since all you're doing is
-announcing that you're interested. The only thing the server needs to respond
-to your request is your IP and port number, and all that is encoded in your
-outgoing package "for free" by Java's `DatagramPacket` class. So just create an
-empty buffer, stick that in a `DatagramPacket` and send it out on the
-`DatagramSocket` that you set up between you and the server.
+announcing that you're interested. The only thing the server needs in order to respond
+to your request is your IP address and port number, and all that is encoded in your
+outgoing package "for free" by the operating system's implementation of the network stack.
+
+So just create an
+empty buffer, and send it out on the `UdpSocket` that you got from the call to
+`bind()` above using [`.send()`](https://doc.rust-lang.org/stable/std/net/struct.UdpSocket.html#method.send).
 
 ### Processing the packets you receive
 
 The main complication when receiving the packets is we don't control the order in which packets will be received. This means, among other things, that:
 
-* The header packet won't necessarily come first, so we might start receiving
+- The header packet won't necessarily come first, so we might start receiving
   data for a file before we've gotten the header for it (and know the file
   name). In an extreme case, we might get *all* the data packets (including the
   one with the "last packet" bit set) before we get the header packet.
-  (Remember that the "last packet" bit tells us how many packets there should
-  be thanks to the packet number, but it doesn't mean that it's the last packet
-  to arrive.)
-* The data packets can arrive in random order, so we'll have to store them in
+- The data packets can arrive in random order, so we'll have to store them in
   some fashion until we have them all, and then put them in order before we
   write them out to the file.
 
+> [!NOTE]
+> It's possible to lose packets with UDP which, unlike TCP, won't request retransmission
+> of lost packets. We're going to ignore that potential concern here, but it would
+> need to be addressed if one wanted a more robust implementation of the client.
+
 Other issues include:
 
-* Packets will arrive from all three files interleaved, so we need to make sure
+- Packets will arrive from all three files interleaved, so we need to make sure
   we can store them sensibly so we can separate out packets for the different
   files.
-* We don't know how many packets a file has been split up into until we see the
+- We don't know how many packets a file has been split up into until we see the
   packet with the "last packet" bit set.
-* You don't know what kind of file they're sending, so you have to make sure to
-  handle the data as if it's binary data. You can't _ever_ convert it to strings
-  or you'll break things when you try to handle binary data.
 
-Most of this is really a data structures problem. Before you start banging on the keyboard, take some time to talk about how you're going to unmarshall the packets and store their data. Having a good plan for that will make a huge difference.
-
-As far as actually receiving the packages, you just need to keep calling
-`socket.receive(packet)` on the `DatagramSocket` you set up until you've got
-all the packets. You'll probably want to construct a new `DatagramPacket` for
-every call to `receive` so that you know that the receipt of a new packet won't
-overwrite the buffer data from the previous packet. Since you know that each
+As far as actually receiving the packets, you need to keep calling
+[`socket.recv(&mut buf)`](https://doc.rust-lang.org/stable/std/net/struct.UdpSocket.html#method.recv)
+on the `UdpSocket` until you've received
+all the packets. Since you know that each
 packet has no more than 1024 bytes of data, the buffer in the packet needs to
 be big enough for the 1024 bytes of data plus the maximum amount of header
-information as discussed in the packet structure description up above.
+information as discussed in the packet structure description up above, i.e.,
+at least 1028 bytes.
+
+### Data structures for packets in Rust
+
+There are a lot of ways you could do this in Rust; I'm going to sketch parts of one
+approach in the hopes that this is useful.
+
+First, I want a `Packet` type that is either a `Header` or `Data` packet:
+
+```rust
+pub enum Packet {
+    Header(Header),
+    Data(Data)
+}
+```
+
+Then `Header` is a struct with a `file_id` and a `file_name` (as a `String`).
+
+```rust
+pub struct Header {
+    file_id: u8,
+    file_name: String
+}
+```
+
+And finally, `Data` is a similar struct:
+
+```rust
+pub struct Data {
+    file_id: u8,
+    packet_number: u16,
+    is_last_packet: bool,
+    data: Vec<u8>
+}
+```
+
+Note that `packet_number` is `u16` since it is formed using two bytes of data.
+
+> [!TIP]
+> For each of these, you probably want to implement the `TryFrom<&[u8]>` trait which
+> you can then use to convert `buf` into the relevant packet type. You probably also
+> want a `::new()` constructor for `Header` and `Data` and it may be useful to have
+> ["get" methods](https://rust-lang.github.io/api-guidelines/naming.html#getter-names-follow-rust-convention-c-getter)
+> to retrieve the relevant parts of packets.
+
+### Data structures for files (packet groups) in Rust
+
+> [!TIP]
+> Most of this is really a data structures problem. Before you start banging on the keyboard, take some time to talk about how you're going to unmarshal the packets and store their data. Having a good plan for that will make a huge difference.
+
+You'll also want some kind of data structure that collects packets for a specific
+file; I called my `PacketGroup` but you may find a better name:
+
+```rust
+pub struct PacketGroup {
+    file_name: Option<String>,
+    expected_number_of_packets: Option<usize>,
+    packets: HashMap<u16, Vec<u8>>
+}
+```
+
+Note that I use `Option<String>` for the `file_name` because we don't initially know what the
+file name is (so we use `None`), and once we learn the file name we can replace it with a
+`Some` variant. The same is true for `expected_number_of_packets`.
+
+The `packets` `HashMap` maps from
+packet number (a `u16`) to the data for that packet (`Vec<u8>`).
+
+You'll probably want to implement a variety of methods on this type.
+I had the following, but your mileage may vary:
+
+- `received_all_packets(&self) -> bool`
+- `process_packet(&mut self, packet: Packet)`
+  - Basically add this packet to the packet group. It works by figuring
+    out which kind of packet this is, and then calling one of the
+    two following methods:
+  - `process_header_packet(&mut self, header: Header)`
+  - `process_data_packet(&mut self, data: Data)`
+- `write_file(&self) -> io::Result<()>`
 
 ## Testing
 
 ### Unit test your work
 
-:bangbang: ***Write tests*** :bangbang:
+> [!CAUTION]
+> If you don't write tests the little bugs in your code become alive and attack you during your sleep!
+> -- @JustusFluegel
 
 While the network stuff is difficult to test, all the parsing and packet/file
 assembly logic is entirely testable. I would *strongly* encourage you to write
@@ -293,9 +352,9 @@ If your client is working correctly, this script should terminate gracefully,
 if slowly (it's taking nearly a minute for me), leaving three files in
 the directory you ran it in:
 
-* `small.txt`
-* `AsYouLikeIt.txt`
-* `binary.jpg`
+- `small.txt`
+- `AsYouLikeIt.txt`
+- `binary.jpg`
 
 The `test/target-files` folder in the repository contains three files with
 the same names – these are copies of the expected files and the files your
