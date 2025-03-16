@@ -55,9 +55,10 @@ documentation includes examples of the methods; see
 [this example](https://gist.github.com/lanedraex/bc01eb399614359470cfacc9d95993fb)
 for a simple working client/server system.
 
-:bangbang: If you're working on lab computers, make sure you shut down all your
-client processes before you leave the lab. If you leave them running you can
-block ports and make it impossible for other people to work on their lab on that computer.
+> [!WARNING]
+> If you're working on lab computers, make sure you shut down all your
+> client processes before you leave the lab. If you leave them running you can
+> block ports and make it impossible for other people to work on their lab on that computer.
 
 ## The OutOfMoney.com protocol
 
@@ -106,16 +107,18 @@ The structure of a data packet is:
 |:------------|:--------|:--------------|:------------------------------------|
 | 1 byte      | 1 byte  | 2 bytes       | the rest of the bytes in the packet |
 
-:bangbang: Note that you'll need to look at the length returned by `recv_from`
-to figure out how many bytes are in "the rest of the bytes in the
-packet". Most of the received packets will probably be "full", but the last
-packet is likely to be "short". You may assume that the maximum packet size,
-however, is 1028 bytes (a data packet with 4 bytes of bookkeeping and 1024
-bytes of data).
+> [!TIP]
+> Note that you'll need to look at the length returned by `recv_from`
+> to figure out how many bytes are in "the rest of the bytes in the
+> packet". Most of the received packets will probably be "full", but the last
+> packet is likely to be "short". You may assume that the maximum packet size,
+> however, is 1028 bytes (a data packet with 4 bytes of bookkeeping and 1024
+> bytes of data).
 
 The decision to only use 1 byte for the file ID means that there can't be more than 256 files being transferred to a given client at a time. Given that the current business plan is to always send exactly three files that shouldn't be a problem, but they'll need to be aware of the limitation if they want to expand the service later.
 
-*Question to think about: Given that we're using 2 bytes for the packet number, and breaking files into 1K chunks, what's the largest file we can transfer using this system?*
+> [!NOTE]
+> Question to think about: Given that we're using 2 bytes for the packet number, and breaking files into 1K chunks, what's the largest file we can transfer using this system?
 
 ### How to construct packet numbers
 
@@ -309,7 +312,7 @@ I had the following, but your mileage may vary:
 
 ### Unit test your work
 
-> [!CAUTION]
+> [!IMPORTANT]
 > If you don't write tests the little bugs in your code become alive and attack you during your sleep!
 > -- @JustusFluegel
 
@@ -435,12 +438,14 @@ right of the image.
 ### Check your work using `bats` tests
 
 There's a (quite simplistic) `bats` test that you can use to run your client
-and check that the files you get match the expected files. Run it from the
-top-level directory, i.e.,
+and check that the files you get match the expected files.
 
-```bash
-bats tests/client_tests.bats
-```
+> [!WARNING]
+> Run it from the top-level directory, i.e.,
+>
+> ```bash
+> bats tests/client_tests.sh
+> ```
 
 It basically does the "hand test" described above against your local server,
 and `diff`s the files you downloaded against the three expected files.
