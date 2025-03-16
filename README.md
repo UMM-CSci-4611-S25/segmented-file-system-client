@@ -444,7 +444,7 @@ and check that the files you get match the expected files.
 > Run it from the top-level directory, i.e.,
 >
 > ```bash
-> bats tests/client_tests.sh
+> bats tests/client_tests.bats
 > ```
 
 It basically does the "hand test" described above against your local server,
