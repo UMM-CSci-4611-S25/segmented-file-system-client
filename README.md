@@ -228,9 +228,27 @@ Then `Header` is a struct with a `file_id` and a `file_name` (as a `String`).
 ```rust
 pub struct Header {
     file_id: u8,
-    file_name: String
+    file_name: OsString
 }
 ```
+
+> [!TIP]
+> In `Header` we're using [`OsString`](https://doc.rust-lang.org/stable/std/ffi/struct.OsString.html)
+> instead of `String`, since `OsString` is the recommended way of representing operating system
+> specific strings, such as file names. See [the `OsString` part of "Representations of non-Rust strings"](https://doc.rust-lang.org/stable/std/ffi/index.html#representations-of-non-rust-strings)
+> in the FFI (foreign function interface) documentation for more.
+>
+> We can convert a `String` (e.g., `s`) to an `OsString` with expressions like `s.into()`.
+> Sometimes Rust can't infer what type you're trying to convert `s` into, so you have to
+> be explicit, either through declaring the type of the target variable, or using `OsString::from()`.
+>
+> ```rust
+> let s = "My file name".to_string();
+> // Declaring the type of `t` makes it clear what `into()` should convert to.
+> let t: OsString = s.into();
+> // Using `OsString::from()` avoids the need for declaring the type of `u`.
+> let u = OsString::from(s);
+> ```
 
 And finally, `Data` is a similar struct:
 
@@ -262,13 +280,13 @@ file; I called my `PacketGroup` but you may find a better name:
 
 ```rust
 pub struct PacketGroup {
-    file_name: Option<String>,
+    file_name: Option<OsString>,
     expected_number_of_packets: Option<usize>,
     packets: HashMap<u16, Vec<u8>>
 }
 ```
 
-Note that I use `Option<String>` for the `file_name` because we don't initially know what the
+Note that I use `Option<OsString>` for the `file_name` because we don't initially know what the
 file name is (so we use `None`), and once we learn the file name we can replace it with a
 `Some` variant. The same is true for `expected_number_of_packets`.
 
@@ -299,23 +317,69 @@ While the network stuff is difficult to test, all the parsing and packet/file
 assembly logic is entirely testable. I would *strongly* encourage you to write
 some tests for that "data structures" part to help define the desired behavior
 and identify logic issues. Debugging logic problems when you're interacting
-with the actual server will really be a nuisance, so isolating that part as
+with the actual server will be a real nuisance, so isolating that part as
 much as possible would be a Good Idea.
 
 You might, for example, have a
-`DataPacket` class (as distinct from the Java library `DatagramPacket` class)
-with a constructor that takes an array of bytes. That class could then be
+`Data` struct (as I suggested above)
+which can be construction an array of bytes using `try_from`.
+That `try_from` logic could then be
 responsible for extracting the status bytes, file ID, packet number, and data,
-and store them in fields that are accessible through various `get`
+and storing them in fields that are accessible through various "get"
 methods. You could then write tests
-that construct `DataPackets` and verify that the resulting
-`DataPackets` have the correct status bytes, file ID, packet number, and data.
+that construct instances of the `Data` struct and verify that the resulting
+structs have the correct status bytes, file ID, packet number, and data.
 
-You could also have a `PacketManager` class that you hand packets to and which
-manages organizing and storing all the packets. You could then hand it a small
+In this test, for example, we create a vector of `u8` that contains:
+
+- 0 as the status byte (which indicates that it's a header packet because it's even)
+- (the second) 0 as the file ID
+- four bytes of data that represent the unicode for the sparkle heart emoji.
+
+We then use our `try_from` implementation to convert that to a `Header` struct,
+and assert that we get a `Header` struct with the correct file ID (12) and the
+correct file name (`"This file is lovely 💖"`).
+
+> [!TIP]
+> `\xPQ` is a byte whose value is 16*P+Q where P and Q are both hexadecimal
+> digits. So `\x00` is the byte having value 0, and `\x0C` is the byte having
+> value 12 (in decimal).
+>
+> In this example, we're setting the status byte to
+> 0, the file ID byte to 12, and the file name to the string containing all
+> the remaining characters, i.e., "This file is lovely 💖". Note that because
+> Rust strings support full Unicode, we can include things like emojis in
+> our packets.
+>
+> The `.as_bytes()` call converts the string to a reference to an
+> array of bytes, correctly handling multi-byte characters like the emoji
+> (which converts to four bytes: `[240, 159, 146, 150]`).
+>
+> Be aware, however, that not all operating systems support emojis
+> in places like file names, so you might want to be careful about creating
+> files with "interesting" names like this.
+
+```rust
+    #[test]
+    fn emoji_in_file_name() {
+        let sparkle_heart: &[u8] = "\x00\x0CThis file is lovely 💖".as_bytes();
+        let result = Header::try_from(sparkle_heart);
+        assert_eq!(
+            result,
+            Ok(Header {
+                file_id: 12,
+                file_name: "This file is lovely 💖".to_string().into()
+            })
+        );
+    }
+```
+
+You could also have a `FileManager` type that you hand packets to and which
+manages organizing and storing all the packets for a group of files.
+You could then hand it a small
 set of test packets that you make up, and verify that it assembles the correct
-files. The `PacketManager` could, for example, create `ReceivedFile` objects.
-`ReceivedFiles` could contain the packets for a file, and have getter methods
+files. The `FileManager` could, for example, create `PacketGroup`s, one per file.
+A `PacketGroup` could contain the packets for a file, and have getter methods
 for the file name, the number of packets (what if it isn't known yet?), the
 number actually received, whether the file is complete, and the data from those
 packets after sorting them in the correct order.
@@ -326,11 +390,12 @@ test that. If you're not clear on how you'd structure something for testing,
 *come ask* rather than just banging out a bunch of code that will just confuse
 us all later.
 
-You don't have to do things like test `DatagramSocket` or file writing. The
-Java folks are responsible for the correctness of `DatagramSocket` and we'll
+You don't have to do things like test `UdpSocket` or file writing. The
+Rust (and operating systems) folks are responsible for the correctness
+of those system calls and we'll
 trust them on that. Testing that you're writing out the correct files is
-essentially handled in the `bats` tests below, so don't bother trying to do
-JUnit things about that.
+essentially handled in the `bats` tests below, so don't bother writing
+unit tests for that.
 
 ### Check your work by running your client by hand
 
