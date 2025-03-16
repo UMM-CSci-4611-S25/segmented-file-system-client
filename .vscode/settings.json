@@ -7,6 +7,7 @@
         "Kaashoek",
         "Saltzer",
         "unmarshal",
-        "usize"
+        "usize",
+        "xeou"
     ]
 }

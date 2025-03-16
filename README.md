@@ -400,34 +400,28 @@ unit tests for that.
 ### Check your work by running your client by hand
 
 In addition to your unit tests, you can run your program "by hand" and see if
-the files you get back match the expected files. There's a script `run_client.sh`
-in `src`; go into `src` and run
+the files you get back match the expected files. Assuming your server is running,
+you can run your client with
 
 ```bash
-./run_client.sh <server>
+cargo run
 ```
 
-Here you replace `<server>` with `localhost` if you want to run your client
-against a copy of the server running on your own machine. If you replace
-`<server>` with the name of the lab box running a copy of the server provided
-by the instructor, then it will run your client against a copy of that
-remote server.
-
 If your client is working correctly, this script should terminate gracefully,
-if slowly (it's taking nearly a minute for me), leaving three files in
+if slowly (there are lots of packets to process), leaving three files in
 the directory you ran it in:
 
 - `small.txt`
 - `AsYouLikeIt.txt`
 - `binary.jpg`
 
-The `test/target-files` folder in the repository contains three files with
+The `tests/target-files` folder in the repository contains three files with
 the same names – these are copies of the expected files and the files your
 program downloaded should match these three files exactly.
-So, for example, (assuming you're still in `src`), running a command like this
+So, for example, running a command like this
 
 ```bash
-diff binary.jpg ../test/target-files/binary.jpg
+diff binary.jpg tests/target-files/binary.jpg
 ```
 
 should return no differences. You should also be able to examine the contents
@@ -445,12 +439,12 @@ and check that the files you get match the expected files. Run it from the
 top-level directory, i.e.,
 
 ```bash
-bats test/client_tests.bats
+bats tests/client_tests.bats
 ```
 
 It basically does the "hand test" described above against your local server,
 and `diff`s the files you downloaded against the three expected files.
 
 If these pass, then your code is probably in good shape from a correctness
-standpoint, but you should still make sure you have reasonable JUnit tests
+standpoint, but you should still make sure you have reasonable unit tests
 and clean, well-organized code.
